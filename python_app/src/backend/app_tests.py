@@ -2,20 +2,20 @@ import unittest
 import tempfile
 import app
 
-
 class WhoKnowsTestCase(unittest.TestCase):
 
     def setUp(self):
         """Before each test, set up a blank database."""
-        self.db = tempfile.NamedTemporaryFile(delete=False)
+        self.db_file = tempfile.NamedTemporaryFile(delete=False)  # Store the file object
+        self.db_path = self.db_file.name # and the name
         self.app = app.app.test_client()
-        app.DATABASE = self.db.name
+        app.DATABASE_PATH = self.db_path  # Use DATABASE_PATH from the app
         app.init_db()
 
     def tearDown(self):
         """Clean up after each test. Delete the database file."""
-        self.db.close()
-        self.db.unlink(self.db.name)
+        self.db_file.close()
+        os.unlink(self.db_path) # unlink the correct path
 
     # helper functions
 
@@ -24,12 +24,12 @@ class WhoKnowsTestCase(unittest.TestCase):
         if password2 is None:
             password2 = password
         if email is None:
-            email = username + '@example.com'
+            email = f"{username}@example.com"  # Use f-string
         return self.app.post('/api/register', data={
-            'username':     username,
-            'password':     password,
-            'password2':    password2,
-            'email':        email,
+            'username': username,
+            'password': password,
+            'password2': password2,
+            'email': email,
         }, follow_redirects=True)
 
     def login(self, username, password):
@@ -77,8 +77,17 @@ class WhoKnowsTestCase(unittest.TestCase):
 
     def test_search(self):
         """Make sure the search works."""
-        pass
+        # Add some test data to the database here if needed.
+        # Example:
+        # with app.app.app_context():
+        #     db = app.connect_db()
+        #     db.execute("INSERT INTO pages (language, content) VALUES ('en', 'Test content')")
+        #     db.commit()
 
+        rv = self.app.get('/?q=Test') # Example search query
+        # Add assertions to check if the search results are correct.
+        # self.assertIn(b'Test content', rv.data) # Example assertion
 
 if __name__ == '__main__':
+    import os  # Import os for file operations
     unittest.main()

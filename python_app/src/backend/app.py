@@ -1,10 +1,10 @@
-from __future__ import with_statement
 import os
 import sys
 import sqlite3
 import hashlib
 from datetime import datetime
 from contextlib import closing
+
 from flask import Flask, request, session, url_for, redirect, render_template, g, flash, jsonify
 
 ################################################################################
@@ -13,15 +13,14 @@ from flask import Flask, request, session, url_for, redirect, render_template, g
 
 DATABASE_PATH = '../whoknows.db'
 PER_PAGE = 30
-DEBUG = False
-SECRET_KEY = 'development key'
+DEBUG = True  # Set to True for development
+SECRET_KEY = 'development key'  # Change this in production
 
 app = Flask(__name__)
-
 app.secret_key = SECRET_KEY
 
 
-################################################################################ 
+################################################################################
 # Database Functions
 ################################################################################
 
@@ -34,12 +33,9 @@ def connect_db(init_mode=False):
 
 def check_db_exists():
     """Checks if the database exists."""
-    db_exists = os.path.exists(DATABASE_PATH)
-    if not db_exists:
-        print "Database not found"
+    if not os.path.exists(DATABASE_PATH):
+        print("Database not found", file=sys.stderr)  # Print to stderr for errors
         sys.exit(1)
-    else:
-        return db_exists
 
 
 def init_db():
@@ -48,7 +44,7 @@ def init_db():
         with app.open_resource('../schema.sql') as f:
             db.cursor().executescript(f.read().decode('utf-8'))
         db.commit()
-        print "Initialized the database: " + str(DATABASE_PATH)
+    print(f"Initialized the database: {DATABASE_PATH}")
 
 
 def query_db(query, args=(), one=False):
@@ -61,7 +57,7 @@ def query_db(query, args=(), one=False):
 
 def get_user_id(username):
     """Convenience method to look up the id for a username."""
-    rv = g.db.execute("SELECT id FROM users WHERE username = '%s'" % username).fetchone()
+    rv = g.db.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone() # Use parameterized query
     return rv[0] if rv else None
 
 
@@ -71,19 +67,18 @@ def get_user_id(username):
 
 @app.before_request
 def before_request():
-    """Make sure we are connected to the database each request and look
-    up the current user so that we know he's there.
-    """
+    """Connect to the database and look up the current user."""
     g.db = connect_db()
     g.user = None
     if 'user_id' in session:
-        g.user = query_db("SELECT * FROM users WHERE id = '%s'" % session['user_id'], one=True)
+        g.user = query_db("SELECT * FROM users WHERE id = ?", (session['user_id'],), one=True) # Use parameterized query
 
 
 @app.after_request
 def after_request(response):
-    """Closes the database again at the end of the request."""
-    g.db.close()
+    """Closes the database connection."""
+    if hasattr(g, 'db'): # Check if g.db exists before closing it
+        g.db.close()
     return response
 
 
@@ -94,13 +89,9 @@ def after_request(response):
 @app.route('/')
 def search():
     """Shows the search page."""
-    q = request.args.get('q', None)
+    q = request.args.get('q')
     language = request.args.get('language', "en")
-    if not q:
-        search_results = []
-    else:
-        search_results = query_db("SELECT * FROM pages WHERE language = '%s' AND content LIKE '%%%s%%'" % (language, q))
-
+    search_results = query_db("SELECT * FROM pages WHERE language = ? AND content LIKE ?", (language, f"%{q}%")) if q else []  # Use parameterized query and f-string
     return render_template('search.html', search_results=search_results, query=q)
 
 
@@ -134,13 +125,9 @@ def register():
 @app.route('/api/search')
 def api_search():
     """API endpoint for search. Returns search results."""
-    q = request.args.get('q', None)
+    q = request.args.get('q')
     language = request.args.get('language', "en")
-    if not q:
-        search_results = []
-    else:
-        search_results = query_db("SELECT * FROM pages WHERE language = '%s' AND content LIKE '%%%s%%'" % (language, q))
-
+    search_results = query_db("SELECT * FROM pages WHERE language = ? AND content LIKE ?", (language, f"%{q}%")) if q else []  # Use parameterized query and f-string
     return jsonify(search_results=search_results)
 
 
@@ -148,7 +135,7 @@ def api_search():
 def api_login():
     """Logs the user in."""
     error = None
-    user = query_db("SELECT * FROM users WHERE username = '%s'" % request.form['username'], one=True)
+    user = query_db("SELECT * FROM users WHERE username = ?", (request.form['username'],), one=True)  # Use parameterized query
     if user is None:
         error = 'Invalid username'
     elif not verify_password(user['password'], request.form['password']):
@@ -177,7 +164,7 @@ def api_register():
     elif get_user_id(request.form['username']) is not None:
         error = 'The username is already taken'
     else:
-        g.db.execute("INSERT INTO users (username, email, password) values ('%s', '%s', '%s')" % 
+        g.db.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)",  # Use parameterized query
                      (request.form['username'], request.form['email'], hash_password(request.form['password'])))
         g.db.commit()
         flash('You were successfully registered and can login now')
@@ -213,7 +200,11 @@ def verify_password(stored_hash, password):
 ################################################################################
 if __name__ == '__main__':
     # Try to connect to the database first
-    connect_db()
+    try:
+        connect_db()
+    except Exception as e:
+        print(f"Error connecting to database: {e}", file=sys.stderr)
+        sys.exit(1)
     # Run the server
     # debug=True enables automatic reloading and better messaging, only for development
     app.run(host="0.0.0.0", port=8080, debug=DEBUG)
